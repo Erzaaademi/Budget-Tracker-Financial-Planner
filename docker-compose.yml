@@ -14,6 +14,19 @@ services:
       - ./user-service:/usr/src/app
       - /usr/src/app/node_modules
 
+  transaction-service:
+    build: ./transaction-service
+    ports:
+      - "3002:3002"
+    environment:
+      - MONGO_URI=mongodb://mongodb:27017/transactions
+      - JWT_SECRET=your_jwt_secret_key_here
+    depends_on:
+      - mongodb
+    volumes:
+      - ./transaction-service:/usr/src/app
+      - /usr/src/app/node_modules
+
   mongodb:
     image: mongo:latest
     ports:

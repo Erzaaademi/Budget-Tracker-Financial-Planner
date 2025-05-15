@@ -5,7 +5,7 @@ A microservices-based application for tracking expenses, managing budgets, and s
 ## Current Implementation Status
 
 - ✅ User Service (Authentication & Profile Management)
-- 🔄 Transaction Service (Coming Soon)
+- ✅ Transaction Service (Implemented)
 - 🔄 Budget Service (Coming Soon)
 
 ## Technology Stack
