@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  # User Service
+  user-service:
+    build: ./user-service
+    container_name: budget-tracker-user-service
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - MONGODB_URI=mongodb://host.docker.internal:27017/Budget-Tracker-&-Financial-Planner
+      - JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
+      - NODE_ENV=development
+    networks:
+      - budget-tracker-network
+    volumes:
+      - ./user-service:/app
+      - /app/node_modules
+
+  # Transaction Service
+  transaction-service:
+    build: ./transaction-service
+    container_name: budget-tracker-transaction-service
+    restart: unless-stopped
+    ports:
+      - "3002:3002"
+    environment:
+      - PORT=3002
+      - MONGODB_URI=mongodb://host.docker.internal:27017/Budget-Tracker-&-Financial-Planner
+      - JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
+      - NODE_ENV=development
+    networks:
+      - budget-tracker-network
+    volumes:
+      - ./transaction-service:/app
+      - /app/node_modules
+
+  # Budget Service
+  budget-service:
+    build: ./budget-service
+    container_name: budget-tracker-budget-service
+    restart: unless-stopped
+    ports:
+      - "3003:3003"
+    environment:
+      - PORT=3003
+      - MONGODB_URI=mongodb://host.docker.internal:27017/Budget-Tracker-&-Financial-Planner
+      - JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
+      - NODE_ENV=development
+    networks:
+      - budget-tracker-network
+    volumes:
+      - ./budget-service:/app
+      - /app/node_modules
+
+  # Frontend
+  frontend:
+    build: ./frontend
+    container_name: budget-tracker-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:3001/api
+      - REACT_APP_TRANSACTION_API_URL=http://localhost:3002/api
+      - REACT_APP_BUDGET_API_URL=http://localhost:3003/api
+    depends_on:
+      - user-service
+      - transaction-service
+      - budget-service
+    networks:
+      - budget-tracker-network
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+networks:
+  budget-tracker-network:
+    driver: bridge
