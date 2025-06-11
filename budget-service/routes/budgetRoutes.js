@@ -5,6 +5,19 @@ const auth = require("../middleware/auth")
 
 const router = express.Router()
 
+// Internal auth middleware for service-to-service communication
+const internalAuth = (req, res, next) => {
+  const token = req.header("Authorization")?.replace("Bearer ", "")
+
+  // Check for internal service token
+  if (token === (process.env.INTERNAL_API_TOKEN || "internal-service-token")) {
+    return next()
+  }
+
+  // Otherwise use regular auth
+  return auth(req, res, next)
+}
+
 // Create budget
 router.post(
   "/",
@@ -95,15 +108,17 @@ router.get(
   },
 )
 
-// Get budget by ID
-router.get("/:id", auth, async (req, res) => {
+// Get budget by ID (with internal auth support)
+router.get("/:id", internalAuth, async (req, res) => {
   try {
-    const budget = await Budget.findOne({
-      _id: req.params.id,
-      userId: req.user.userId,
-    })
+    const budget = await Budget.findById(req.params.id)
 
     if (!budget) {
+      return res.status(404).json({ message: "Budget not found" })
+    }
+
+    // If using regular auth, check user ownership
+    if (req.user && req.user.userId && budget.userId.toString() !== req.user.userId) {
       return res.status(404).json({ message: "Budget not found" })
     }
 
@@ -114,10 +129,10 @@ router.get("/:id", auth, async (req, res) => {
   }
 })
 
-// Update budget
+// Update budget (with internal auth support)
 router.put(
   "/:id",
-  auth,
+  internalAuth,
   [
     body("name").optional().notEmpty().trim().escape(),
     body("limit").optional().isNumeric().isFloat({ min: 0.01 }),
@@ -133,7 +148,14 @@ router.put(
         return res.status(400).json({ errors: errors.array() })
       }
 
-      const budget = await Budget.findOneAndUpdate({ _id: req.params.id, userId: req.user.userId }, req.body, {
+      const filter = { _id: req.params.id }
+
+      // If using regular auth, check user ownership
+      if (req.user && req.user.userId) {
+        filter.userId = req.user.userId
+      }
+
+      const budget = await Budget.findOneAndUpdate(filter, req.body, {
         new: true,
         runValidators: true,
       })

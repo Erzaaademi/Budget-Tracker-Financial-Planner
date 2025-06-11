@@ -7,6 +7,11 @@ const transactionSchema = new mongoose.Schema(
       required: true,
       ref: "User",
     },
+    budgetId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Budget",
+      default: null,
+    },
     amount: {
       type: Number,
       required: true,
@@ -83,5 +88,6 @@ transactionSchema.pre("save", function (next) {
 // Index for better query performance
 transactionSchema.index({ userId: 1, date: -1 })
 transactionSchema.index({ userId: 1, category: 1 })
+transactionSchema.index({ budgetId: 1 })
 
 module.exports = mongoose.model("Transaction", transactionSchema)

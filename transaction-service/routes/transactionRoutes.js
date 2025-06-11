@@ -2,8 +2,48 @@ const express = require("express")
 const { body, validationResult, query } = require("express-validator")
 const Transaction = require("../models/Transaction")
 const auth = require("../middleware/auth")
+const axios = require("axios")
 
 const router = express.Router()
+
+// Helper function to recalculate budget spent amount from all transactions
+async function recalculateBudgetSpent(budgetId, userToken) {
+  try {
+    const budgetServiceUrl = process.env.BUDGET_SERVICE_URL || "http://localhost:3003"
+
+    console.log(`🔄 Recalculating budget spent for budget: ${budgetId}`)
+
+    // Get all transactions for this budget
+    const allTransactions = await Transaction.find({
+      budgetId: budgetId,
+      type: "expense",
+    })
+
+    // Calculate total spent from all transactions
+    const totalSpent = allTransactions.reduce((sum, transaction) => sum + transaction.amount, 0)
+
+    console.log(`📊 Found ${allTransactions.length} transactions, total: $${totalSpent}`)
+
+    // Update budget with the calculated total
+    const updateResponse = await axios.put(
+      `${budgetServiceUrl}/api/budgets/${budgetId}`,
+      { spent: totalSpent },
+      {
+        headers: {
+          Authorization: `Bearer ${userToken}`,
+          "Content-Type": "application/json",
+        },
+        timeout: 5000,
+      },
+    )
+
+    console.log(`✅ Budget updated successfully. New spent: $${updateResponse.data.budget.spent}`)
+    return updateResponse.data.budget
+  } catch (error) {
+    console.error("❌ Error recalculating budget:", error.response?.data || error.message)
+    return null
+  }
+}
 
 // Create transaction
 router.post(
@@ -15,6 +55,7 @@ router.post(
     body("category").notEmpty().trim().escape(),
     body("description").notEmpty().trim().escape(),
     body("date").optional().isISO8601(),
+    body("budgetId").optional().isMongoId(),
     body("tags").optional().isArray(),
   ],
   async (req, res) => {
@@ -24,6 +65,8 @@ router.post(
         return res.status(400).json({ errors: errors.array() })
       }
 
+      console.log("💰 Creating transaction:", req.body)
+
       const transactionData = {
         ...req.body,
         userId: req.user.userId,
@@ -32,12 +75,28 @@ router.post(
       const transaction = new Transaction(transactionData)
       await transaction.save()
 
+      console.log("✅ Transaction created successfully:", transaction._id)
+
+      // Recalculate budget if budgetId is provided and transaction is expense
+      if (req.body.budgetId && req.body.type === "expense") {
+        console.log("🎯 Recalculating budget for expense transaction...")
+
+        const userToken = req.header("Authorization")?.replace("Bearer ", "")
+        const updatedBudget = await recalculateBudgetSpent(req.body.budgetId, userToken)
+
+        if (updatedBudget) {
+          console.log("🎉 Budget recalculated successfully")
+        } else {
+          console.log("⚠️ Budget recalculation failed")
+        }
+      }
+
       res.status(201).json({
         message: "Transaction created successfully",
         transaction,
       })
     } catch (error) {
-      console.error("Transaction creation error:", error)
+      console.error("❌ Transaction creation error:", error)
       res.status(500).json({ message: "Server error" })
     }
   },
@@ -126,6 +185,7 @@ router.put(
     body("category").optional().notEmpty().trim().escape(),
     body("description").optional().notEmpty().trim().escape(),
     body("date").optional().isISO8601(),
+    body("budgetId").optional().isMongoId(),
     body("tags").optional().isArray(),
   ],
   async (req, res) => {
@@ -135,14 +195,45 @@ router.put(
         return res.status(400).json({ errors: errors.array() })
       }
 
+      console.log("🔄 Updating transaction:", req.params.id)
+
+      // Get the original transaction
+      const originalTransaction = await Transaction.findOne({
+        _id: req.params.id,
+        userId: req.user.userId,
+      })
+
+      if (!originalTransaction) {
+        return res.status(404).json({ message: "Transaction not found" })
+      }
+
+      const userToken = req.header("Authorization")?.replace("Bearer ", "")
+      const budgetsToRecalculate = new Set()
+
+      // Track which budgets need recalculation
+      if (originalTransaction.budgetId && originalTransaction.type === "expense") {
+        budgetsToRecalculate.add(originalTransaction.budgetId.toString())
+      }
+
+      // Update the transaction
       const transaction = await Transaction.findOneAndUpdate(
         { _id: req.params.id, userId: req.user.userId },
         req.body,
         { new: true, runValidators: true },
       )
 
-      if (!transaction) {
-        return res.status(404).json({ message: "Transaction not found" })
+      // Track new budget if changed
+      const newBudgetId = req.body.budgetId !== undefined ? req.body.budgetId : originalTransaction.budgetId
+      const newType = req.body.type || originalTransaction.type
+
+      if (newBudgetId && newType === "expense") {
+        budgetsToRecalculate.add(newBudgetId.toString())
+      }
+
+      // Recalculate all affected budgets
+      for (const budgetId of budgetsToRecalculate) {
+        console.log(`🎯 Recalculating budget: ${budgetId}`)
+        await recalculateBudgetSpent(budgetId, userToken)
       }
 
       res.json({
@@ -150,7 +241,7 @@ router.put(
         transaction,
       })
     } catch (error) {
-      console.error("Update transaction error:", error)
+      console.error("❌ Update transaction error:", error)
       res.status(500).json({ message: "Server error" })
     }
   },
@@ -159,7 +250,7 @@ router.put(
 // Delete transaction
 router.delete("/:id", auth, async (req, res) => {
   try {
-    const transaction = await Transaction.findOneAndDelete({
+    const transaction = await Transaction.findOne({
       _id: req.params.id,
       userId: req.user.userId,
     })
@@ -168,9 +259,26 @@ router.delete("/:id", auth, async (req, res) => {
       return res.status(404).json({ message: "Transaction not found" })
     }
 
+    console.log("🗑️ Deleting transaction:", transaction._id)
+
+    const budgetToRecalculate = transaction.budgetId
+    const userToken = req.header("Authorization")?.replace("Bearer ", "")
+
+    // Delete the transaction
+    await Transaction.findOneAndDelete({
+      _id: req.params.id,
+      userId: req.user.userId,
+    })
+
+    // Recalculate budget if it was linked to one
+    if (budgetToRecalculate && transaction.type === "expense") {
+      console.log("🎯 Recalculating budget after deletion...")
+      await recalculateBudgetSpent(budgetToRecalculate, userToken)
+    }
+
     res.json({ message: "Transaction deleted successfully" })
   } catch (error) {
-    console.error("Delete transaction error:", error)
+    console.error("❌ Delete transaction error:", error)
     res.status(500).json({ message: "Server error" })
   }
 })

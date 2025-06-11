@@ -7,6 +7,7 @@ import toast from "react-hot-toast"
 
 const Transactions = () => {
   const [transactions, setTransactions] = useState([])
+  const [budgets, setBudgets] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editingTransaction, setEditingTransaction] = useState(null)
@@ -22,11 +23,15 @@ const Transactions = () => {
     handleSubmit,
     reset,
     setValue,
+    watch,
     formState: { errors },
   } = useForm()
 
+  const watchType = watch("type")
+
   useEffect(() => {
     fetchTransactions()
+    fetchBudgets()
   }, [filters])
 
   const fetchTransactions = async () => {
@@ -43,13 +48,28 @@ const Transactions = () => {
     }
   }
 
+  const fetchBudgets = async () => {
+    try {
+      const response = await api.getBudgets({ isActive: true })
+      setBudgets(response.data.budgets)
+    } catch (error) {
+      console.error("Fetch budgets error:", error)
+    }
+  }
+
   const onSubmit = async (data) => {
     try {
+      // Only include budgetId if type is expense and a budget is selected
+      const transactionData = {
+        ...data,
+        budgetId: data.type === "expense" && data.budgetId ? data.budgetId : undefined,
+      }
+
       if (editingTransaction) {
-        await api.updateTransaction(editingTransaction._id, data)
+        await api.updateTransaction(editingTransaction._id, transactionData)
         toast.success("Transaction updated successfully")
       } else {
-        await api.createTransaction(data)
+        await api.createTransaction(transactionData)
         toast.success("Transaction created successfully")
       }
 
@@ -70,6 +90,7 @@ const Transactions = () => {
     setValue("category", transaction.category)
     setValue("description", transaction.description)
     setValue("date", new Date(transaction.date).toISOString().split("T")[0])
+    setValue("budgetId", transaction.budgetId || "")
     setShowForm(true)
   }
 
@@ -100,6 +121,14 @@ const Transactions = () => {
       startDate: "",
       endDate: "",
     })
+  }
+
+  // Get available budgets for the selected category
+  const getAvailableBudgets = () => {
+    const selectedCategory = watch("category")
+    if (!selectedCategory) return budgets
+
+    return budgets.filter((budget) => budget.category.toLowerCase().includes(selectedCategory.toLowerCase()))
   }
 
   return (
@@ -245,6 +274,24 @@ const Transactions = () => {
                 )}
               </div>
 
+              {/* Budget Selection - Only show for expenses */}
+              {watchType === "expense" && (
+                <div className="form-group">
+                  <label className="form-label">Budget (Optional)</label>
+                  <select className="form-control" {...register("budgetId")}>
+                    <option value="">No Budget</option>
+                    {getAvailableBudgets().map((budget) => (
+                      <option key={budget._id} value={budget._id}>
+                        {budget.name} - {budget.category} (${budget.spent.toFixed(2)}/${budget.limit.toFixed(2)})
+                      </option>
+                    ))}
+                  </select>
+                  <small style={{ color: "#666", fontSize: "12px" }}>
+                    Select a budget to automatically track spending
+                  </small>
+                </div>
+              )}
+
               <div className="form-group">
                 <label className="form-label">Description</label>
                 <input
@@ -303,46 +350,58 @@ const Transactions = () => {
                   <th>Category</th>
                   <th>Type</th>
                   <th>Amount</th>
+                  <th>Budget</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {transactions.map((transaction) => (
-                  <tr key={transaction._id}>
-                    <td>{new Date(transaction.date).toLocaleDateString()}</td>
-                    <td>{transaction.description}</td>
-                    <td>{transaction.category}</td>
-                    <td>
-                      <span className={`badge ${transaction.type === "income" ? "badge-success" : "badge-danger"}`}>
-                        {transaction.type}
-                      </span>
-                    </td>
-                    <td
-                      style={{
-                        color: transaction.type === "income" ? "#28a745" : "#dc3545",
-                        fontWeight: "bold",
-                      }}
-                    >
-                      {transaction.type === "income" ? "+" : "-"}${transaction.amount.toFixed(2)}
-                    </td>
-                    <td>
-                      <button
-                        className="btn btn-secondary"
-                        onClick={() => handleEdit(transaction)}
-                        style={{ marginRight: "10px", fontSize: "12px", padding: "4px 8px" }}
+                {transactions.map((transaction) => {
+                  const linkedBudget = budgets.find((b) => b._id === transaction.budgetId)
+
+                  return (
+                    <tr key={transaction._id}>
+                      <td>{new Date(transaction.date).toLocaleDateString()}</td>
+                      <td>{transaction.description}</td>
+                      <td>{transaction.category}</td>
+                      <td>
+                        <span className={`badge ${transaction.type === "income" ? "badge-success" : "badge-danger"}`}>
+                          {transaction.type}
+                        </span>
+                      </td>
+                      <td
+                        style={{
+                          color: transaction.type === "income" ? "#28a745" : "#dc3545",
+                          fontWeight: "bold",
+                        }}
                       >
-                        Edit
-                      </button>
-                      <button
-                        className="btn btn-danger"
-                        onClick={() => handleDelete(transaction._id)}
-                        style={{ fontSize: "12px", padding: "4px 8px" }}
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                        {transaction.type === "income" ? "+" : "-"}${transaction.amount.toFixed(2)}
+                      </td>
+                      <td>
+                        {linkedBudget ? (
+                          <span style={{ fontSize: "12px", color: "#666" }}>{linkedBudget.name}</span>
+                        ) : (
+                          <span style={{ fontSize: "12px", color: "#999" }}>No Budget</span>
+                        )}
+                      </td>
+                      <td>
+                        <button
+                          className="btn btn-secondary"
+                          onClick={() => handleEdit(transaction)}
+                          style={{ marginRight: "10px", fontSize: "12px", padding: "4px 8px" }}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          className="btn btn-danger"
+                          onClick={() => handleDelete(transaction._id)}
+                          style={{ fontSize: "12px", padding: "4px 8px" }}
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
