@@ -6,6 +6,49 @@ const axios = require("axios")
 
 const router = express.Router()
 
+// Helper function to calculate transaction statistics
+async function calculateTransactionStats(userId) {
+  try {
+    // Get all transactions for the user
+    const transactions = await Transaction.find({ userId })
+
+    // Calculate summary by type (income/expense)
+    const summary = transactions.reduce((acc, transaction) => {
+      const type = transaction.type
+      const amount = transaction.amount
+      
+      if (!acc[type]) {
+        acc[type] = { _id: type, total: 0 }
+      }
+      acc[type].total += amount
+      return acc
+    }, {})
+
+    // Calculate category breakdown
+    const categoryBreakdown = transactions.reduce((acc, transaction) => {
+      if (transaction.type === 'expense') {
+        const category = transaction.category
+        if (!acc[category]) {
+          acc[category] = { _id: category, total: 0 }
+        }
+        acc[category].total += transaction.amount
+      }
+      return acc
+    }, {})
+
+    // Convert to array and sort by total
+    const categoryArray = Object.values(categoryBreakdown).sort((a, b) => b.total - a.total)
+
+    return {
+      summary: Object.values(summary),
+      categoryBreakdown: categoryArray
+    }
+  } catch (error) {
+    console.error('Error calculating transaction stats:', error)
+    throw error
+  }
+}
+
 // Helper function to recalculate budget spent amount from all transactions
 async function recalculateBudgetSpent(budgetId, userToken) {
   try {
@@ -155,6 +198,17 @@ router.get(
     }
   },
 )
+
+// Get transaction statistics
+router.get("/stats/summary", auth, async (req, res) => {
+  try {
+    const stats = await calculateTransactionStats(req.user.userId)
+    res.json(stats)
+  } catch (error) {
+    console.error("Get transaction stats error:", error)
+    res.status(500).json({ message: "Server error" })
+  }
+})
 
 // Get transaction by ID
 router.get("/:id", auth, async (req, res) => {
