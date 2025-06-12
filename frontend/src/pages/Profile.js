@@ -13,6 +13,7 @@ const Profile = () => {
     register,
     handleSubmit,
     formState: { errors },
+    reset,
   } = useForm({
     defaultValues: {
       firstName: user?.firstName || "",
@@ -22,15 +23,30 @@ const Profile = () => {
     },
   })
 
+  // Update form when user data changes
+  useState(() => {
+    if (user) {
+      reset({
+        firstName: user.firstName || "",
+        lastName: user.lastName || "",
+        "preferences.currency": user.preferences?.currency || "USD",
+        "preferences.theme": user.preferences?.theme || "light",
+      })
+    }
+  }, [user, reset])
+
   const onSubmit = async (data) => {
     try {
       setLoading(true)
+      console.log("Submitting profile data:", data)
+
       const result = await updateProfile(data)
 
       if (result.success) {
         toast.success("Profile updated successfully")
       } else {
-        toast.error(result.error)
+        toast.error(result.error || "Failed to update profile")
+        console.error("Update failed:", result)
       }
     } catch (error) {
       console.error("Profile update error:", error)
@@ -172,6 +188,16 @@ const Profile = () => {
             <div style={{ marginBottom: "15px" }}>
               <strong>User ID:</strong>
               <div style={{ color: "#666", fontSize: "14px", fontFamily: "monospace" }}>{user.id}</div>
+            </div>
+
+            <div style={{ marginBottom: "15px" }}>
+              <strong>Current Currency:</strong>
+              <div style={{ color: "#666" }}>{user.preferences?.currency || "USD"}</div>
+            </div>
+
+            <div style={{ marginBottom: "15px" }}>
+              <strong>Current Theme:</strong>
+              <div style={{ color: "#666" }}>{user.preferences?.theme || "light"}</div>
             </div>
           </div>
         </div>
